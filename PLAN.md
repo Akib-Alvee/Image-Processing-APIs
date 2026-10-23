@@ -4,7 +4,7 @@ A Cloudinary-inspired backend image processing service built with **Python (Fast
 
 ---
 
-## Current Build Progress (Continue from Step 4)
+## Current Build Progress (Continue from Step 5)
 
 - [x] **Step 0: Architecture & Planning**
   - [x] Finalize tech stack (FastAPI, Pillow, PostgreSQL, MinIO, RabbitMQ, Redis, Celery)
@@ -25,12 +25,12 @@ A Cloudinary-inspired backend image processing service built with **Python (Fast
   - [x] `app/schemas/auth.py` — Pydantic request/response schemas for auth
   - [x] `app/api/deps.py` — `get_current_user` JWT guard dependency
   - [x] `app/api/routes/auth.py` — `/register` (with `IntegrityError` rollback), `/login`, `/refresh`, `/logout`
-- [ ] **Step 4: S3/MinIO Storage, Redis Cache, Rate Limiter & Image Upload/Retrieval** *(NEXT STEP)*
-  - [ ] `app/services/storage.py` — `boto3` S3/MinIO adapter
-  - [ ] `app/schemas/image.py` — Pydantic schemas for image metadata & transformations
-  - [ ] `app/core/redis.py` & `app/core/rate_limit.py` — Redis cache & sliding-window rate limiter
-  - [ ] `app/api/routes/images.py` — Upload (`POST /images`), Get by ID (`GET /images/{id}`), Paginated List (`GET /images`)
-- [ ] **Step 5: Pillow Transformation Engine & Hybrid Celery/RabbitMQ Queue**
+- [x] **Step 4: S3/MinIO Storage, Redis Cache, Rate Limiter & Image Upload/Retrieval**
+  - [x] `app/services/storage.py` — `boto3` S3/MinIO adapter
+  - [x] `app/schemas/image.py` — Pydantic schemas for image metadata & transformations
+  - [x] `app/core/redis.py` & `app/core/rate_limit.py` — Redis cache & sliding-window rate limiter
+  - [x] `app/api/routes/images.py` — Upload (`POST /images`), Get by ID (`GET /images/{id}`), Paginated List (`GET /images`)
+- [/] **Step 5: Pillow Transformation Engine & Hybrid Celery/RabbitMQ Queue** *(NEXT STEP)*
   - [ ] `app/services/processor.py` — Pillow pipeline (`resize`, `crop`, `rotate`, `flip`, `mirror`, `watermark`, `compress`, `format`, `grayscale`, `sepia`)
   - [ ] `app/worker/celery_app.py` & `app/worker/tasks.py` — Celery + RabbitMQ broker + Redis backend
   - [ ] `app/services/image_service.py` — Sync/Async transformation orchestration (`POST /images/{id}/transform?async=false|true` & `GET /images/{id}/jobs/{job_id}`) & deduplication cache
@@ -65,9 +65,11 @@ A Cloudinary-inspired backend image processing service built with **Python (Fast
 - `POST /refresh` — Rotate Refresh Token and return a new `access_token` + `refresh_token`.
 - `POST /logout` — Revoke Refresh Token.
 
-### Image Management & Transformation Endpoints (Steps 4 & 5)
+### Image Management Endpoints (Completed in Step 4)
 - `POST /images` — Multipart image upload, validates & extracts dimensions/format with Pillow, uploads to MinIO S3, stores metadata in PostgreSQL.
+- `GET /images/{id}` — Retrieve image details/metadata (or stream/download image with optional `?raw=true` / `?format=`).
+- `GET /images?page=1&limit=10` — Paginated list of user's uploaded images (cached in Redis).
+
+### Image Transformation Endpoints (Step 5 — Next)
 - `POST /images/{id}/transform?async=false` — Hybrid Sync/Async transformation endpoint with SHA-256 `transformation_hash` deduplication in Redis & PostgreSQL.
 - `GET /images/{id}/jobs/{job_id}` — Poll status of async Celery transformation task.
-- `GET /images/{id}` — Retrieve image details/metadata (or stream/download image with optional `?raw=true` / `?format=`).
-- `GET /images?page=1&limit=10` — Paginated list of user's uploaded images.
