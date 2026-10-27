@@ -56,9 +56,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # 4. MinIO (Local S3-Compatible Object Storage)
+  # 4. MinIO / Silo (Local S3-Compatible Object Storage — open-source MinIO fork on Docker Hub)
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:latest
     container_name: image_api_minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -72,30 +72,8 @@ services:
       - "9001:9001" # MinIO Web Console (http://localhost:9001)
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
-  # 5. MinIO Bucket Initializer (Automatically creates the bucket & makes it downloadable)
-  minio-init:
-    image: minio/mc:latest
-    container_name: image_api_minio_init
-    env_file:
-      - .env
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY};
-      mc mb --ignore-existing local/${S3_BUCKET_NAME};
-      mc anonymous set download local/${S3_BUCKET_NAME};
-      exit 0;
-      "
-
-  # 6. FastAPI Backend Server
+  # 5. FastAPI Backend Server
   api:
     build: .
     container_name: image_api_server
@@ -122,9 +100,9 @@ services:
       rabbitmq:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
 
-  # 7. Celery Background Worker (Consumes transformation tasks from RabbitMQ)
+  # 6. Celery Background Worker (Consumes transformation tasks from RabbitMQ)
   worker:
     build: .
     container_name: image_api_worker
@@ -150,7 +128,7 @@ services:
       rabbitmq:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
 
 volumes:
   postgres_data:

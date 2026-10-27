@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import Any
 
@@ -18,6 +19,7 @@ class S3StorageService:
     def __init__(self) -> None:
         self.bucket_name = settings.S3_BUCKET_NAME
         self.public_base_url = settings.S3_PUBLIC_URL.rstrip("/")
+        self._bucket_verified = False
         self._client = boto3.client(
             "s3",
             endpoint_url=settings.S3_ENDPOINT_URL,
@@ -26,6 +28,37 @@ class S3StorageService:
             region_name=settings.S3_REGION,
             config=Config(signature_version="s3v4"),
         )
+
+    def ensure_bucket_exists(self) -> None:
+        """
+        Automatically create the S3/MinIO bucket if it does not exist yet
+        and apply a public read policy so browser image URLs work out of the box.
+        """
+        if self._bucket_verified:
+            return
+        try:
+            self._client.head_bucket(Bucket=self.bucket_name)
+        except ClientError:
+            self._client.create_bucket(Bucket=self.bucket_name)
+            public_read_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"AWS": ["*"]},
+                        "Action": ["s3:GetObject"],
+                        "Resource": [f"arn:aws:s3:::{self.bucket_name}/*"],
+                    }
+                ],
+            }
+            try:
+                self._client.put_bucket_policy(
+                    Bucket=self.bucket_name,
+                    Policy=json.dumps(public_read_policy),
+                )
+            except ClientError:
+                pass
+        self._bucket_verified = True
 
     def generate_storage_key(
         self,
@@ -54,6 +87,7 @@ class S3StorageService:
     ) -> str:
         """Upload raw image bytes to the S3/MinIO bucket and return its public URL."""
         try:
+            self.ensure_bucket_exists()
             self._client.put_object(
                 Bucket=self.bucket_name,
                 Key=storage_key,
