@@ -10,15 +10,19 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
-from app.core.rate_limit import upload_rate_limiter
+from app.core.rate_limit import transform_rate_limiter, upload_rate_limiter
 from app.core.redis import cache_delete_pattern, cache_get, cache_set
 from app.models.image import Image
 from app.schemas.image import (
+    AsyncJobResponse,
     ImageDetailResponse,
     ImageResponse,
     PaginatedImagesResponse,
     SupportedFormat,
+    TransformationResponse,
+    TransformRequest,
 )
+from app.services.image_service import image_transformation_service
 from app.services.storage import storage_service
 
 router = APIRouter(prefix="/images", tags=["Images"])
@@ -244,3 +248,65 @@ async def get_image(
     detail_response = ImageDetailResponse.model_validate(db_image)
     await cache_set(cache_key, detail_response.model_dump(mode="json"))
     return detail_response
+
+
+@router.post(
+    "/{image_id}/transform",
+    response_model=TransformationResponse | AsyncJobResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[transform_rate_limiter],
+    summary="Apply transformations to an image (Sync or Async via RabbitMQ/Celery)",
+)
+async def transform_image(
+    image_id: uuid.UUID,
+    payload: TransformRequest,
+    current_user: CurrentUser,
+    db: DBSession,
+    response: Response,
+    async_mode: Annotated[
+        bool,
+        Query(
+            alias="async",
+            description="Set true to queue transformation in RabbitMQ/Celery and receive a job_id (202 Accepted)",
+        ),
+    ] = False,
+) -> TransformationResponse | AsyncJobResponse:
+    """
+    Apply one or more transformations (resize, crop, rotate, flip, mirror, watermark,
+    compress, format, grayscale/sepia filters) to an uploaded image:
+    - Checks Redis & PostgreSQL `transformation_hash` first (instant return if already computed).
+    - **Sync Mode (`?async=false`, default)**: Processes immediately with Pillow and returns `200 OK` with the transformed URL and metadata.
+    - **Async Mode (`?async=true`)**: Publishes job to RabbitMQ for Celery worker processing and returns `202 Accepted` with `job_id`.
+    """
+    result = await image_transformation_service.transform_image(
+        db=db,
+        user_id=current_user.id,
+        image_id=image_id,
+        options=payload.transformations,
+        async_mode=async_mode,
+    )
+    if isinstance(result, AsyncJobResponse):
+        response.status_code = status.HTTP_202_ACCEPTED
+    return result
+
+
+@router.get(
+    "/{image_id}/jobs/{job_id}",
+    response_model=TransformationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Poll the status and result of an async transformation job",
+)
+async def get_transformation_job_status(
+    image_id: uuid.UUID,
+    job_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TransformationResponse:
+    """Check whether an asynchronous Celery transformation task is PENDING, PROCESSING, COMPLETED, or FAILED."""
+    return await image_transformation_service.get_job_status(
+        db=db,
+        user_id=current_user.id,
+        image_id=image_id,
+        job_id=job_id,
+    )
+
